@@ -56,16 +56,13 @@ class ChangesUnitTests {
 		var files = Stream.of(
 
 				// Maven
-				"pom.xml",
+				"pom.xml", "nested/pom.xml",
 
-				// Gradle Groovy and Kotlin DSL build/settings at the module root
-				"build.gradle", "build.gradle.kts",
-				"settings.gradle", "settings.gradle.kts",
-				"gradle.properties",
-
-				// Version catalog and wrapper
-				"gradle/libs.versions.toml",
-				"gradle/wrapper/gradle-wrapper.properties");
+				// Gradle
+				"build.gradle", "build.gradle.kts", "gradle.properties", "settings.gradle", "settings.gradle.kts",
+				"init.gradle.kts", "nested/build.gradle", "nested/settings.gradle", "nested/gradle.properties",
+				"gradle/libs.versions.toml", "gradle/wrapper/gradle-wrapper.properties", "gradle/my-conventions.gradle.kts",
+				"buildSrc/src/main/kotlin/Dependencies.kt", "build-logic/src/main/kotlin/conventions.gradle.kts");
 
 		return DynamicTest.stream(files, it -> it + " is considered build resource", it -> {
 
@@ -76,50 +73,48 @@ class ChangesUnitTests {
 		});
 	}
 
+	@Test // GH-1382, GH-1699
+	void shouldBackOffForGradleKotlinDslBuildLogicChanges() {
+
+		var modifiedFilePaths = Stream.of(
+				"buildSrc/src/main/kotlin/Dependencies.kt",
+				"build-logic/src/main/kotlin/conventions.gradle.kts")
+				.map(ModifiedFile::new);
+
+		var result = Changes.of(modifiedFilePaths, OnNoChange.EXECUTE_ALL);
+
+		assertThat(result.hasBuildResourceChanges()).isTrue();
+		assertThat(result).containsExactlyInAnyOrder(
+				new OtherFileChange("buildSrc/src/main/kotlin/Dependencies.kt"),
+				new OtherFileChange("build-logic/src/main/kotlin/conventions.gradle.kts"));
+	}
+
 	@TestFactory // GH-1699
-	Stream<DynamicTest> ignoresNestedBuildResources() {
+	Stream<DynamicTest> ignoresNonBuildGradleKotlinDslFiles() {
 
 		var files = Stream.of(
-
-				// Sub-modules of a multi-module build are tested independently; their build files
-				// must not trigger a full run of the surrounding module.
-				"module-a/pom.xml",
-				"module-a/build.gradle.kts",
-				"module-a/settings.gradle.kts",
-
-				// Dedicated build-logic directories sit at the repo root and are handled by their
-				// own per-module change detection.
-				"buildSrc/build.gradle.kts",
-				"buildSrc/src/main/kotlin/my.convention.gradle.kts",
-				"build-logic/convention/build.gradle.kts",
-
-				// Convention scripts in arbitrary nested locations
-				"config/conventions/java.gradle.kts",
-
-				// Files committed as docs / samples / fixtures that happen to share a name with a
-				// build file
 				"src/main/kotlin/example.gradle.kts",
-				"src/main/resources/sample/build.gradle",
-				"src/test/resources/fixtures/pom.xml");
+				"src/test/resources/fixtures/example.gradle.kts");
 
-		return DynamicTest.stream(files, it -> it + " is not treated as a build resource", it -> {
+		return DynamicTest.stream(files, it -> it + " is not considered build resource", it -> {
 			assertThat(new OtherFileChange(it).affectsBuildResource()).isFalse();
 		});
 	}
 
-	@TestFactory // GH-1699
-	Stream<DynamicTest> kotlinSourcesAreClassifiedAsSourceChanges() {
+	@Test // GH-1382, GH-1699
+	void shouldKeepApplicationKotlinSourcesAsSourceChanges() {
 
-		var files = Stream.of(
-				"src/main/kotlin/com/example/Service.kt",
-				"src/test/kotlin/com/example/ServiceTest.kt");
+		var modifiedFilePaths = Stream.of(
+				"src/main/kotlin/example/Order.kt",
+				"src/test/kotlin/example/OrderTests.kt")
+				.map(ModifiedFile::new);
 
-		return DynamicTest.stream(files, it -> it + " is a Kotlin source change", it -> {
+		var result = Changes.of(modifiedFilePaths, OnNoChange.EXECUTE_ALL);
 
-			var change = Changes.Change.of(new ModifiedFile(it));
-
-			assertThat(change).isInstanceOfAny(KotlinSourceChange.class, KotlinTestSourceChange.class);
-		});
+		assertThat(result.hasBuildResourceChanges()).isFalse();
+		assertThat(result).containsExactlyInAnyOrder(
+				new KotlinSourceChange("example.Order"),
+				new KotlinTestSourceChange("example.OrderTests"));
 	}
 
 	@Test // GH-31, GH-1382
