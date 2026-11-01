@@ -404,6 +404,15 @@ The JDBC-based implementation will create a dedicated table for the event public
 The schema creation will of course also back off if the required tables already exist, for example if created via database migration tools such as Flyway or Liquibase.
 For details, please consult the xref:appendix.adoc#schemas[schema overview] in the appendix.
 
+Looking up publications by an incomplete status, for example when resubmitting failed publications, only considers publications without a completion date and can thus use the index on that column.
+If a large number of incomplete publications accumulates, a partial index on the status of incomplete publications speeds up those lookups further on databases that support it, for example on PostgreSQL:
+
+[source, sql]
+----
+CREATE INDEX CONCURRENTLY event_publication_incomplete_by_status_idx
+  ON event_publication (status) WHERE completion_date IS NULL;
+----
+
 [[publication-registry.serialization]]
 === Event Serializer
 

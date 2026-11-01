@@ -183,8 +183,8 @@ class JpaEventPublicationRepository implements EventPublicationRepository {
 	private static final String FIND_FAILED = """
 				select p
 			  from DefaultJpaEventPublication p
-			 where (p.status = org.springframework.modulith.events.EventPublication$Status.FAILED
-			    or (p.status is null and p.completionDate is null))
+			 where p.completionDate is null
+			   and (p.status = org.springframework.modulith.events.EventPublication$Status.FAILED or p.status is null)
 			""";
 
 	private static final int DELETE_BATCH_SIZE = 100;
@@ -545,7 +545,7 @@ class JpaEventPublicationRepository implements EventPublicationRepository {
 	@Override
 	public List<TargetEventPublication> findByStatus(Status status) {
 
-		var query = entityNameByStatus.andThen(FIND_BY_STATUS::formatted).apply(status);
+		var query = byStatus(FIND_BY_STATUS, status);
 
 		return entityManager.createQuery(query, JpaEventPublication.class)
 				.setParameter(1, status)
@@ -561,7 +561,7 @@ class JpaEventPublicationRepository implements EventPublicationRepository {
 	@Override
 	public int countByStatus(Status status) {
 
-		var query = entityNameByStatus.andThen(COUNT_BY_STATUS::formatted).apply(status);
+		var query = byStatus(COUNT_BY_STATUS, status);
 
 		return ((Long) entityManager.createQuery(query)
 				.setParameter(1, status)
@@ -588,6 +588,22 @@ class JpaEventPublicationRepository implements EventPublicationRepository {
 				.setParameter(2, listenerId.getValue());
 
 		return query.getResultStream().findFirst();
+	}
+
+	/**
+	 * Returns the given status query for the entity holding publications in the given {@link Status}. Publications in a
+	 * non-terminal status must not have been completed, as older versions did not consistently update the stored status
+	 * on completion. This also allows the lookup to use an index on the completion date.
+	 *
+	 * @param query must not be {@literal null}.
+	 * @param status must not be {@literal null}.
+	 * @return will never be {@literal null}.
+	 */
+	private String byStatus(String query, Status status) {
+
+		var result = query.formatted(entityNameByStatus.apply(status));
+
+		return status.isTerminal() ? result : result + " and p.completionDate is null";
 	}
 
 	private String serializeEvent(Object event) {

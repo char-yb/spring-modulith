@@ -549,8 +549,8 @@ class JdbcEventPublicationRepositoryV2 implements EventPublicationRepository, Be
 
 		var sql = """
 				SELECT %s FROM %s
-				 WHERE STATUS = '%s'
-				""".formatted(ALL_COLUMNS, table, status.name());
+				 WHERE %s
+				""".formatted(ALL_COLUMNS, table, byStatus(status));
 
 		var result = operations.query(sql, this::resultSetToPublications);
 
@@ -568,8 +568,8 @@ class JdbcEventPublicationRepositoryV2 implements EventPublicationRepository, Be
 
 		var sql = asOneLine("""
 				SELECT COUNT(ID) FROM %s
-				 WHERE STATUS = '%s'
-				""".formatted(table, status.name()));
+				 WHERE %s
+				""".formatted(table, byStatus(status)));
 
 		var result = operations.queryForObject(sql, int.class);
 
@@ -587,7 +587,8 @@ class JdbcEventPublicationRepositoryV2 implements EventPublicationRepository, Be
 		var sql = """
 				SELECT %s
 				  FROM %s
-				 WHERE (STATUS = 'FAILED' OR (STATUS IS NULL AND COMPLETION_DATE IS NULL))
+				 WHERE COMPLETION_DATE IS NULL
+				   AND (STATUS = 'FAILED' OR STATUS IS NULL)
 				""".formatted(ALL_COLUMNS, settings.getTable());
 
 		var instant = criteria.getPublicationDateReference();
@@ -715,6 +716,21 @@ class JdbcEventPublicationRepositoryV2 implements EventPublicationRepository, Be
 		return IntStream.range(0, length)
 				.mapToObj(__ -> "?")
 				.collect(Collectors.joining(", ", "(", ")"));
+	}
+
+	/**
+	 * Returns the predicate to look up publications in the given {@link Status}. Publications in a non-terminal status
+	 * must not have been completed, as older versions did not consistently update the stored status on completion.
+	 * This also allows the lookup to use the index on the completion date.
+	 *
+	 * @param status must not be {@literal null}.
+	 * @return will never be {@literal null}.
+	 */
+	private static String byStatus(Status status) {
+
+		return status.isTerminal()
+				? "STATUS = '%s'".formatted(status.name())
+				: "STATUS = '%s' AND COMPLETION_DATE IS NULL".formatted(status.name());
 	}
 
 	private static String asOneLine(String string) {

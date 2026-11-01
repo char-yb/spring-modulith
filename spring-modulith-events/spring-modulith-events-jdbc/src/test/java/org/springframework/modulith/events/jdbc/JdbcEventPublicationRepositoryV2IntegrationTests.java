@@ -22,6 +22,7 @@ import static org.mockito.Mockito.*;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -36,6 +37,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
@@ -695,6 +698,19 @@ class JdbcEventPublicationRepositoryV2IntegrationTests {
 			assertThat(repository.findFailedPublications(criteria)).isEmpty();
 		}
 
+		@ParameterizedTest // GH-1984
+		@EnumSource(value = Status.class, names = { "COMPLETED", "ABANDONED" }, mode = EnumSource.Mode.EXCLUDE)
+		void doesNotLookUpPreviouslyCompletedPublicationsByIncompleteStatus(Status status) {
+
+			var publication = createPublication(new TestEvent("completed"));
+
+			setCompletedKeepingStatus(publication, status);
+
+			assertThat(repository.findByStatus(status)).isEmpty();
+			assertThat(repository.countByStatus(status)).isZero();
+			assertThat(repository.findFailedPublications(FailedCriteria.ALL)).isEmpty();
+		}
+
 		/**
 		 * Simulates a publication persisted by a schema version that predates the {@code STATUS} column, i.e. one for
 		 * which the column was never backfilled and is {@literal null} rather than defaulted.
@@ -704,6 +720,18 @@ class JdbcEventPublicationRepositoryV2IntegrationTests {
 			var id = properties.getDatabaseType().uuidToDatabase(publication.getIdentifier());
 
 			operations.update("UPDATE " + table() + " SET STATUS = NULL WHERE ID = ?", id);
+		}
+
+		/**
+		 * Simulates a publication completed by a version that did not consistently update the stored status on
+		 * completion.
+		 */
+		private void setCompletedKeepingStatus(TargetEventPublication publication, Status status) {
+
+			var id = properties.getDatabaseType().uuidToDatabase(publication.getIdentifier());
+
+			operations.update("UPDATE " + table() + " SET STATUS = ?, COMPLETION_DATE = ? WHERE ID = ?", status.name(),
+					Timestamp.from(Instant.now()), id);
 		}
 
 		private void assertOneByStatus(Status reference) {

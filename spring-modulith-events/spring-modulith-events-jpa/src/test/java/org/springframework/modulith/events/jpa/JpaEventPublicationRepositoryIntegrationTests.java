@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assumptions.*;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -37,6 +38,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
@@ -659,6 +662,19 @@ class JpaEventPublicationRepositoryIntegrationTests {
 			assertThat(repository.findFailedPublications(criteria)).isEmpty();
 		}
 
+		@ParameterizedTest // GH-1984
+		@EnumSource(value = Status.class, names = { "COMPLETED", "ABANDONED" }, mode = EnumSource.Mode.EXCLUDE)
+		void doesNotLookUpPreviouslyCompletedPublicationsByIncompleteStatus(Status status) {
+
+			var publication = createPublication(new TestEvent("completed"));
+
+			setCompletedKeepingStatus(publication, status);
+
+			assertThat(repository.findByStatus(status)).isEmpty();
+			assertThat(repository.countByStatus(status)).isZero();
+			assertThat(repository.findFailedPublications(FailedCriteria.ALL)).isEmpty();
+		}
+
 		/**
 		 * Simulates a publication persisted by a schema version that predates the {@code status} column, i.e. one for
 		 * which the column was never backfilled and is {@literal null} rather than defaulted.
@@ -669,6 +685,20 @@ class JpaEventPublicationRepositoryIntegrationTests {
 
 			new JdbcTemplate(dataSource)
 					.update("update event_publication set status = null where id = ?", publication.getIdentifier());
+
+			em.clear();
+		}
+
+		/**
+		 * Simulates a publication completed by a version that did not consistently update the stored status on
+		 * completion.
+		 */
+		private void setCompletedKeepingStatus(TargetEventPublication publication, Status status) {
+
+			em.flush();
+
+			new JdbcTemplate(dataSource).update("update event_publication set status = ?, completionDate = ? where id = ?",
+					status.name(), Timestamp.from(Instant.now()), publication.getIdentifier());
 
 			em.clear();
 		}
