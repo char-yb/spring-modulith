@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.util.ArrayList;
 import java.util.Optional;
 
 import javax.sql.DataSource;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
 import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.jdbc.support.JdbcUtils;
 import org.springframework.modulith.events.core.EventSerializer;
 import org.springframework.modulith.testapp.TestApplication;
 import org.springframework.test.context.ActiveProfiles;
@@ -58,6 +60,7 @@ class DatabaseSchemaInitializerIntegrationTests {
 	class WithInitEnabled extends TestBase {
 
 		@Autowired JdbcOperations operations;
+		@Autowired DataSource dataSource;
 		@Autowired Optional<DatabaseSchemaInitializer> initializer;
 
 		@Test // GH-3
@@ -68,6 +71,31 @@ class DatabaseSchemaInitializerIntegrationTests {
 		@Test // GH-3
 		void shouldCreateDatabaseSchemaOnStartUp() {
 			assertThatNoException().isThrownBy(() -> operations.queryForObject(COUNT_PUBLICATIONS, Long.class));
+		}
+
+		@Test // GH-1984
+		void createsIndexOnStatusColumn() throws Exception {
+
+			var indexes = JdbcUtils.extractDatabaseMetaData(dataSource, metadata -> {
+
+				var table = metadata.storesLowerCaseIdentifiers() ? "event_publication" : "EVENT_PUBLICATION";
+				var result = new ArrayList<String>();
+
+				try (var resultSet = metadata.getIndexInfo(null, null, table, false, true)) {
+					while (resultSet.next()) {
+						result.add(resultSet.getString("INDEX_NAME"));
+					}
+				}
+
+				return result;
+			});
+
+			assertThat(indexes).anyMatch("EVENT_PUBLICATION_BY_STATUS_IDX"::equalsIgnoreCase);
+		}
+
+		@Test // GH-1984
+		void doesNotFailInitializingAnExistingSchema() {
+			assertThatNoException().isThrownBy(() -> initializer.orElseThrow().afterPropertiesSet());
 		}
 	}
 
